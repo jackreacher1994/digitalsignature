@@ -1,0 +1,13 @@
+{
+    "name": "quannh/digitalsignature",
+    "description": "Package to create and validate Digital Signature",
+    "authors": [
+        {
+            "name": "Nguyen Hong Quan",
+            "email": "quannh1995@outlook.com"
+        }
+    ],
+    "type": "library",
+    "minimum-stability": "dev",
+    "require": {}
+}
