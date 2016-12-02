@@ -13,7 +13,9 @@ class DigitalSignatureServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        //
+        $this->publishes([
+            __DIR__ . '/config' => config_path(),
+        ]);
     }
 
     /**
@@ -23,6 +25,10 @@ class DigitalSignatureServiceProvider extends ServiceProvider
      */
     public function register()
     {
+        $this->mergeConfigFrom(
+            __DIR__ . '/config/signature.php', 'digital-signature'
+        );
+
         $this->app->singleton('digitalsignature', function () {
             return new DigitalSignature;
         });

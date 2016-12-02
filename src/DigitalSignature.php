@@ -19,7 +19,7 @@ class DigitalSignature
     const C14N_EXCLUSIVE = 'http://www.w3.org/2001/10/xml-exc-c14n#';
     const C14N_EXCLUSIVE_COMMENTS = 'http://www.w3.org/2001/10/xml-exc-c14n#WithComments';
 
-    //Sign method
+    //Signature method
     const RSA_ALGORITHM = 1;
     const DSA_ALGORITHM = 2;
     const ECDSA_ALGORITHM = 3;
