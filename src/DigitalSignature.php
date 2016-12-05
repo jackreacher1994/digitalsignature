@@ -127,13 +127,15 @@ class DigitalSignature
         }
 
         //If the canonicalization process failed
-        throw new \UnexpectedValueException('Unable to canonicalize the DOM document!');
+        trigger_error('Unable to canonicalize the DOM document!', E_USER_ERROR);
+        return false;
     }
 
     protected function checkDigestSupport()
     {
         if (!in_array($this->digestMethod, hash_algos())) {
             trigger_error(sprintf('The current version of PHP does not support the %s hashing algorithm', $this->digestMethod), E_USER_ERROR);
+            return false;
         }
     }
 
@@ -151,6 +153,7 @@ class DigitalSignature
             $this->canonicalMethod = $method;
         } else {
             trigger_error('The chosen canonical method is not supported!', E_USER_WARNING);
+            return false;
         }
 
         return $this;
@@ -165,6 +168,7 @@ class DigitalSignature
             $this->digestMethod = $method;
         } else {
             trigger_error('The chosen digest method is not supported!', E_USER_WARNING);
+            return false;
         }
 
         $this->checkDigestSupport();
@@ -177,8 +181,10 @@ class DigitalSignature
     {
         if (!array_key_exists($algo, $this->digestSignatureAlgoMapping)) {
             trigger_error('The chosen sign algorithm is not supported!', E_USER_WARNING);
+            return false;
         } else if (!array_key_exists($this->digestMethod, $this->digestSignatureAlgoMapping[$algo])) {
             trigger_error('The chosen sign algorithm does not support the chosen digest method!', E_USER_WARNING);
+            return false;
         } else {
             $this->cryptoAlgorithm = $algo;
         }
@@ -189,20 +195,22 @@ class DigitalSignature
     public function loadPrivateKey($filePath, $passphrase)
     {
         if (!file_exists($filePath) || !is_readable($filePath)) {
-            throw new \UnexpectedValueException(sprintf('Unable to open file "%s"!', $filePath));
+            //throw new \UnexpectedValueException(sprintf('Unable to open file "%s"!', $filePath));
+            throw new \UnexpectedValueException(sprintf('Không thể mở được tập tin "%s"!', $filePath));
         }
 
         $key = @file_get_contents($filePath);
 
         if (!is_string($key) || 0 === strlen($key)) {
-            throw new \UnexpectedValueException(sprintf('File "%s" is empty!', $filePath));
+            //throw new \UnexpectedValueException(sprintf('File "%s" is empty!', $filePath));
+            throw new \UnexpectedValueException(sprintf('Tập tin "%s" không có nội dung!', $filePath));
         }
-
 
         $privKey = openssl_pkey_get_private($key, $passphrase);
 
         if (false === $privKey) {
-            throw new \UnexpectedValueException('Unable to load the private key!');
+            //throw new \UnexpectedValueException('Unable to load the private key!');
+            throw new \UnexpectedValueException('Chứng thư này không hợp lệ!');
         }
 
         $this->privateKey = $privKey;
@@ -215,7 +223,8 @@ class DigitalSignature
         $pubKey = openssl_pkey_get_public($key);
 
         if (false === $pubKey) {
-            throw new \UnexpectedValueException('Unable to load the public key!');
+            //throw new \UnexpectedValueException('Unable to load the public key!');
+            throw new \UnexpectedValueException('Khóa công khai của người dùng không hợp lệ!');
         }
 
         $this->publicKey = $pubKey;
@@ -257,7 +266,8 @@ class DigitalSignature
         if (is_string($data) && strlen($data)) {
             $data = $this->doc->createTextNode($data);
         } else if (!is_object($data) || !$data instanceof \DOMNode) {
-            throw new \UnexpectedValueException('Digested data must be a non-empty string or DOMNode!');
+            //throw new \UnexpectedValueException('Digested data must be a non-empty string or DOMNode!');
+            throw new \UnexpectedValueException('Vui lòng hoàn tất form nhập liệu!');
         }
 
         $data = $this->doc->importNode($data, true);
@@ -308,11 +318,11 @@ class DigitalSignature
         return true;
     }
 
-    //Sign the document
     public function sign()
     {
         if (is_null($this->doc)) {
-            return new \UnexpectedValueException('No document to sign!');
+            trigger_error('No document to sign!', E_USER_ERROR);
+            return false;
         }
 
         //Find the SignedInfo element to sign
@@ -322,22 +332,26 @@ class DigitalSignature
         }
 
         $c14nSignedInfo = $this->canonicalize($signedInfo);
+        //var_dump($c14nSignedInfo);
 
         //Which OpenSSL algorithm to use
         if (!array_key_exists($this->digestMethod, $this->openSSLAlgoMapping)) {
-            throw new \UnexpectedValueException('No OpenSSL algorithm has been defined for the digest algorithm!');
+            trigger_error('No OpenSSL algorithm has been defined for the digest algorithm!', E_USER_ERROR);
+            return false;
         }
 
         //Sign the SignedInfo element using the private key
         if (!openssl_sign($c14nSignedInfo, $signature, $this->privateKey, $this->openSSLAlgoMapping[$this->digestMethod])) {
-            throw new \UnexpectedValueException('Unable to sign the document! Error: ' . openssl_error_string());
+            //throw new \UnexpectedValueException('Unable to sign the document! Error: ' . openssl_error_string());
+            throw new \UnexpectedValueException('Không thể ký! Đã xảy ra lỗi: ' . openssl_error_string());
         }
 
         $signature = base64_encode($signature);
 
         $signatureNode = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
         if (is_null($signatureNode)) {
-            throw new \UnexpectedValueException('Unabled to find the SingatureValue node!');
+            trigger_error('Unabled to find the SingatureValue node!', E_USER_ERROR);
+            return false;
         }
 
         $signatureNode->appendChild($this->doc->createTextNode($signature));
@@ -351,28 +365,40 @@ class DigitalSignature
         return $this->doc->saveXML();
     }
 
-    //Verify the digital signature
-    public function verify()
+    public function getSignatureValue()
     {
+        $signatureValue = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
+        if (is_null($signatureValue)) {
+            trigger_error('Unabled to find the SignatureValue node!', E_USER_ERROR);
+            return false;
+        }
+        return $signatureValue->nodeValue;
+    }
+
+    public function getSignedInfo()
+    {
+        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
+        if (is_null($signedInfo)) {
+            trigger_error('Unabled to find the SignedInfo node!', E_USER_ERROR);
+            return false;
+        }
+
+        $c14nSignedInfo = $this->canonicalize($signedInfo);
+        return $c14nSignedInfo;
+    }
+
+    public function verify($c14nSignedInfo, $signatureValue)
+    {
+        $this->setCryptoAlgorithm(config('signature.signature-method'));
+        $this->setDigestMethod(config('signature.digest-method'));
+        $this->forceStandalone();
+
         if (is_null($this->publicKey)) {
             trigger_error('Cannot verify the digital signature without the public key!', E_USER_WARNING);
             return false;
         }
 
-        //Find the SignedInfo element which was signed
-        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
-        if (is_null($signedInfo)) {
-            throw new \UnexpectedValueException('Unabled to find the SignedInfo node!');
-        }
-
-        $c14nSignedInfo = $this->canonicalize($signedInfo);
-
-        $signatureValue = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
-        if (is_null($signatureValue)) {
-            throw new \UnexpectedValueException('Unabled to find the SignatureValue node!');
-        }
-
-        $signature = base64_decode($signatureValue->nodeValue);
+        $signature = base64_decode($signatureValue);
 
         return 1 === openssl_verify($c14nSignedInfo, $signature, $this->publicKey, $this->openSSLAlgoMapping[$this->digestMethod]);
     }
