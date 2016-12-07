@@ -96,6 +96,13 @@ class DigitalSignature
     //Namespace prefix for each node name
     protected $nodeNsPrefix = 'dsig:';
 
+    public function _construct()
+    {
+        $this->setCryptoAlgorithm(config('signature.signature-method'));
+        $this->setDigestMethod(config('signature.digest-method'));
+        $this->forceStandalone();
+    }
+
     //Set the namespace prefix for each node name
     public function setNodeNsPrefix($prefix)
     {
@@ -236,6 +243,7 @@ class DigitalSignature
     protected function createXmlStructure()
     {
         $this->doc = new \DOMDocument('1.0', 'UTF-8');
+        //$this->doc->formatOutput = true;
         $this->doc->xmlStandalone = $this->standalone;
 
         $signature = $this->doc->createElementNS(self::XML_DSIG_NS, $this->nodeNsPrefix . 'Signature');
@@ -309,6 +317,8 @@ class DigitalSignature
         } catch (\UnexpectedValueException $e) {
             throw $e;
         }
+        //var_dump($c14nData);
+        //exit(1);
 
         $referenceDigest = $this->calculateDigest($c14nData);
 
@@ -333,6 +343,7 @@ class DigitalSignature
 
         $c14nSignedInfo = $this->canonicalize($signedInfo);
         //var_dump($c14nSignedInfo);
+        //exit(1);
 
         //Which OpenSSL algorithm to use
         if (!array_key_exists($this->digestMethod, $this->openSSLAlgoMapping)) {
@@ -367,36 +378,33 @@ class DigitalSignature
 
     public function getSignatureValue()
     {
+        //Find the signature value to verify
         $signatureValue = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
         if (is_null($signatureValue)) {
-            trigger_error('Unabled to find the SignatureValue node!', E_USER_ERROR);
-            return false;
+            throw new \UnexpectedValueException('Unabled to find the SignatureValue node!');
         }
+
         return $signatureValue->nodeValue;
     }
 
-    public function getSignedInfo()
+    public function verify($arrData, $signatureValue)
     {
-        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
-        if (is_null($signedInfo)) {
-            trigger_error('Unabled to find the SignedInfo node!', E_USER_ERROR);
-            return false;
-        }
-
-        $c14nSignedInfo = $this->canonicalize($signedInfo);
-        return $c14nSignedInfo;
-    }
-
-    public function verify($c14nSignedInfo, $signatureValue)
-    {
-        $this->setCryptoAlgorithm(config('signature.signature-method'));
-        $this->setDigestMethod(config('signature.digest-method'));
-        $this->forceStandalone();
-
         if (is_null($this->publicKey)) {
             trigger_error('Cannot verify the digital signature without the public key!', E_USER_WARNING);
             return false;
         }
+
+        foreach ($arrData as $key => $value) {
+            $this->addObject($value, $key);
+        }
+        //Find the SignedInfo element
+        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
+        if (is_null($signedInfo)) {
+            throw new \UnexpectedValueException('Unabled to find the SignedInfo node!');
+        }
+        $c14nSignedInfo = $this->canonicalize($signedInfo);
+        //var_dump($c14nSignedInfo);
+        //exit(1);
 
         $signature = base64_decode($signatureValue);
 
