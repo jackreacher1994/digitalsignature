@@ -25,6 +25,9 @@ class DigitalSignature
     const ECDSA_ALGORITHM = 3;
     const HMAC_ALGORITHM = 4;
 
+    //Transform method
+    const TRANS = 'http://www.w3.org/2006/12/xml-c14n11';
+
     //Mapping digest algorithm to its W3 spec URI
     protected $digestMethodUriMapping = array(
         self::DIGEST_SHA1 => 'http://www.w3.org/2000/09/xmldsig#sha1',
@@ -84,45 +87,22 @@ class DigitalSignature
     //Canonicalization method to canonicalize the document
     protected $canonicalMethod = self::C14N;
 
+    //Transform method to transform data
+    protected $transformMethod = self::TRANS;
+
     //Digest algorithm for digesting
     protected $digestMethod = self::DIGEST_SHA1;
 
     //Sign algorithm to sign with the private key
     protected $cryptoAlgorithm = self::RSA_ALGORITHM;
 
-    //XML standalone declaration
-    protected $standalone = false;
-
-    //Namespace prefix for each node name
-    protected $nodeNsPrefix = 'dsig:';
-
     public function _construct()
     {
         $this->setCryptoAlgorithm(config('signature.signature-method'));
         $this->setDigestMethod(config('signature.digest-method'));
-        $this->forceStandalone();
     }
 
-    //Set the namespace prefix for each node name
-    public function setNodeNsPrefix($prefix)
-    {
-        if (is_string($prefix) && strlen($prefix)) {
-            $this->nodeNsPrefix = rtrim($prefix, ':') . ':';
-        } else {
-            $this->nodeNsPrefix = '';
-        }
-
-        return $this;
-    }
-
-    //Forces the signed document to be standalone
-    public function forceStandalone()
-    {
-        $this->standalone = true;
-        return $this;
-    }
-
-    //Canonicalize a DOM document or a single DOM node
+    //Canonicalize a single DOM node
     protected function canonicalize(\DOMNode $object)
     {
         $options = $this->c14nOptionMapping[$this->canonicalMethod];
@@ -134,7 +114,21 @@ class DigitalSignature
         }
 
         //If the canonicalization process failed
-        trigger_error('Unable to canonicalize the DOM document!', E_USER_ERROR);
+        trigger_error('Unable to canonicalize the DOM node!', E_USER_ERROR);
+        return false;
+    }
+
+    //Transform a single DOM node
+    protected function transform(\DOMNode $object)
+    {
+        $c14nData = $object->C14N();
+
+        if (is_string($c14nData) && strlen($c14nData)) {
+            return $c14nData;
+        }
+
+        //If the transform process failed
+        trigger_error('Unable to transform the DOM node!', E_USER_ERROR);
         return false;
     }
 
@@ -151,19 +145,6 @@ class DigitalSignature
         $this->checkDigestSupport();
 
         return base64_encode(hash($this->digestMethod, $data, true));
-    }
-
-    //Set the canonical method to canonicalize the document
-    public function setCanonicalMethod($method)
-    {
-        if (array_key_exists($method, $this->c14nOptionMapping)) {
-            $this->canonicalMethod = $method;
-        } else {
-            trigger_error('The chosen canonical method is not supported!', E_USER_WARNING);
-            return false;
-        }
-
-        return $this;
     }
 
     //Set the digest method to calculate the digest value of the data
@@ -242,25 +223,25 @@ class DigitalSignature
     //Prepare the XML template
     protected function createXmlStructure()
     {
-        $this->doc = new \DOMDocument('1.0', 'UTF-8');
-        //$this->doc->formatOutput = true;
-        $this->doc->xmlStandalone = $this->standalone;
+        $this->doc = new \DOMDocument(config('signature.version'), config('signature.encoding'));
+        $this->doc->preserveWhiteSpace = false;
+        $this->doc->formatOutput = true;
 
-        $signature = $this->doc->createElementNS(self::XML_DSIG_NS, $this->nodeNsPrefix . 'Signature');
+        $signature = $this->doc->createElementNS(self::XML_DSIG_NS, 'Signature');
         $this->doc->appendChild($signature);
 
-        $signedInfo = $this->doc->createElement($this->nodeNsPrefix . 'SignedInfo');
+        $signedInfo = $this->doc->createElement('SignedInfo');
         $signature->appendChild($signedInfo);
 
-        $c14nMethod = $this->doc->createElement($this->nodeNsPrefix . 'CanonicalizationMethod');
+        $c14nMethod = $this->doc->createElement('CanonicalizationMethod');
         $c14nMethod->setAttribute('Algorithm', $this->canonicalMethod);
         $signedInfo->appendChild($c14nMethod);
 
-        $sigMethod = $this->doc->createElement($this->nodeNsPrefix . 'SignatureMethod');
+        $sigMethod = $this->doc->createElement('SignatureMethod');
         $sigMethod->setAttribute('Algorithm', $this->digestSignatureAlgoMapping[$this->cryptoAlgorithm][$this->digestMethod]);
         $signedInfo->appendChild($sigMethod);
 
-        $sigValue = $this->doc->createElement($this->nodeNsPrefix . 'SignatureValue');
+        $sigValue = $this->doc->createElement('SignatureValue');
         $signature->appendChild($sigValue);
     }
 
@@ -280,7 +261,7 @@ class DigitalSignature
 
         $data = $this->doc->importNode($data, true);
 
-        $object = $this->doc->createElement($this->nodeNsPrefix . 'Object');
+        $object = $this->doc->createElement('Object');
         $object->appendChild($data);
         $this->doc->getElementsByTagName('Signature')->item(0)->appendchild($object);
 
@@ -297,10 +278,10 @@ class DigitalSignature
         return true;
     }
 
-    public function addReference(\DOMNode $node, $uri)
+    protected function addReference(\DOMNode $node, $uri)
     {
-        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
-        $reference = $this->doc->createElement($this->nodeNsPrefix . 'Reference');
+        $signedInfo = $this->doc->getElementsByTagName('SignedInfo')->item(0);
+        $reference = $this->doc->createElement('Reference');
         $signedInfo->appendChild($reference);
 
         if (is_string($uri) && strlen($uri)) {
@@ -308,21 +289,24 @@ class DigitalSignature
             $reference->setAttribute('URI', $uri);
         }
 
-        $digestMethod = $this->doc->createElement($this->nodeNsPrefix . 'DigestMethod');
+        $transforms = $this->doc->createElement('Transforms');
+        $transform = $this->doc->createElement('Transform');
+        $transform->setAttribute('Algorithm', $this->transformMethod);
+        $transforms->appendChild($transform);
+        $reference->appendChild($transforms);
+
+        $digestMethod = $this->doc->createElement('DigestMethod');
         $digestMethod->setAttribute('Algorithm', $this->digestMethodUriMapping[$this->digestMethod]);
         $reference->appendChild($digestMethod);
 
-        try {
-            $c14nData = $this->canonicalize($node);
-        } catch (\UnexpectedValueException $e) {
-            throw $e;
-        }
+
+        $c14nData = $this->transform($node);
         //var_dump($c14nData);
         //exit(1);
 
         $referenceDigest = $this->calculateDigest($c14nData);
 
-        $digestValue = $this->doc->createElement($this->nodeNsPrefix . 'DigestValue', $referenceDigest);
+        $digestValue = $this->doc->createElement('DigestValue', $referenceDigest);
         $reference->appendChild($digestValue);
 
         return true;
@@ -336,11 +320,11 @@ class DigitalSignature
         }
 
         //Find the SignedInfo element to sign
-        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
+        $signedInfo = $this->doc->getElementsByTagName('SignedInfo')->item(0);
         if (is_null($signedInfo)) {
-            throw new \UnexpectedValueException('Unabled to find the SignedInfo node!');
+            trigger_error('Unabled to find the SignedInfo node!', E_USER_ERROR);
+            return false;
         }
-
         $c14nSignedInfo = $this->canonicalize($signedInfo);
         //var_dump($c14nSignedInfo);
         //exit(1);
@@ -356,15 +340,12 @@ class DigitalSignature
             //throw new \UnexpectedValueException('Unable to sign the document! Error: ' . openssl_error_string());
             throw new \UnexpectedValueException('Không thể ký! Đã xảy ra lỗi: ' . openssl_error_string());
         }
-
         $signature = base64_encode($signature);
-
-        $signatureNode = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
+        $signatureNode = $this->doc->getElementsByTagName('SignatureValue')->item(0);
         if (is_null($signatureNode)) {
             trigger_error('Unabled to find the SingatureValue node!', E_USER_ERROR);
             return false;
         }
-
         $signatureNode->appendChild($this->doc->createTextNode($signature));
 
         return true;
@@ -376,39 +357,96 @@ class DigitalSignature
         return $this->doc->saveXML();
     }
 
-    public function getSignatureValue()
-    {
-        //Find the signature value to verify
-        $signatureValue = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignatureValue')->item(0);
-        if (is_null($signatureValue)) {
-            throw new \UnexpectedValueException('Unabled to find the SignatureValue node!');
-        }
-
-        return $signatureValue->nodeValue;
-    }
-
-    public function verify($arrData, $signatureValue)
+    public function verifySignature($signedDocument)
     {
         if (is_null($this->publicKey)) {
-            trigger_error('Cannot verify the digital signature without the public key!', E_USER_WARNING);
+            trigger_error('Cannot verify the digital signature without public key!', E_USER_WARNING);
             return false;
         }
 
-        foreach ($arrData as $key => $value) {
-            $this->addObject($value, $key);
-        }
         //Find the SignedInfo element
-        $signedInfo = $this->doc->getElementsByTagName($this->nodeNsPrefix . 'SignedInfo')->item(0);
+        $signedInfo = $signedDocument->getElementsByTagNameNS(self::XML_DSIG_NS, 'SignedInfo')->item(0);
         if (is_null($signedInfo)) {
-            throw new \UnexpectedValueException('Unabled to find the SignedInfo node!');
+            trigger_error('Unabled to find the SignedInfo node!', E_USER_ERROR);
+            return false;
         }
         $c14nSignedInfo = $this->canonicalize($signedInfo);
         //var_dump($c14nSignedInfo);
         //exit(1);
 
-        $signature = base64_decode($signatureValue);
+        //Find the signature value to verify
+        $signatureValue = $signedDocument->getElementsByTagNameNS(self::XML_DSIG_NS, 'SignatureValue')->item(0);
+        if (is_null($signatureValue)) {
+            trigger_error('Unabled to find the SignatureValue node!', E_USER_ERROR);
+            return false;
+        }
+        //var_dump($signatureValue->nodeValue);
+        //exit(1);
+        $signature = base64_decode($signatureValue->nodeValue);
 
         return 1 === openssl_verify($c14nSignedInfo, $signature, $this->publicKey, $this->openSSLAlgoMapping[$this->digestMethod]);
+    }
+
+    protected function getReference($signedDocument, $objectID)
+    {
+        $references = $signedDocument->getElementsByTagNameNS(self::XML_DSIG_NS, 'Reference');
+        if ($references->length == 0) {
+            trigger_error('Unabled to find the Reference node!', E_USER_ERROR);
+            return false;
+        }
+
+        foreach ($references as $reference) {
+            $uri = $reference->getAttribute('URI');
+            if (substr($uri, 1) === $objectID) {
+                return $reference;
+            }
+        }
+
+        trigger_error('Unabled to find the Reference node with this URI!', E_USER_ERROR);
+        return false;
+    }
+
+    public function verifyData($signedDocument)
+    {
+        $objects = $signedDocument->getElementsByTagNameNS(self::XML_DSIG_NS, 'Object');
+        if ($objects->length == 0) {
+            trigger_error('Unabled to find the Object node!', E_USER_ERROR);
+            return false;
+        }
+
+        foreach ($objects as $node) {
+            $c14nData = $this->transform($node);
+            $referenceDigest = $this->calculateDigest($c14nData);
+
+            $objectId = $node->getAttribute('ID');
+            $reference = $this->getReference($signedDocument, $objectId);
+            $digest = $reference->getElementsByTagName('DigestValue')->item(0);
+
+            if ($referenceDigest !== $digest->nodeValue) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function getData($signedDocument, $objectID)
+    {
+        $objects = $signedDocument->getElementsByTagNameNS(self::XML_DSIG_NS, 'Object');
+        if ($objects->length == 0) {
+            trigger_error('Unabled to find the Object node!', E_USER_ERROR);
+            return false;
+        }
+
+        foreach ($objects as $object) {
+            $id = $object->getAttribute('ID');
+            if ($id === $objectID) {
+                return $object->nodeValue;
+            }
+        }
+
+        trigger_error('Unabled to find the Object node with this ID!', E_USER_ERROR);
+        return false;
     }
 
 }
