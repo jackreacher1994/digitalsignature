@@ -256,7 +256,7 @@ class DigitalSignature
             $data = $this->doc->createTextNode($data);
         } else if (!is_object($data) || !$data instanceof \DOMNode) {
             //throw new \UnexpectedValueException('Digested data must be a non-empty string or DOMNode!');
-            throw new \UnexpectedValueException('Vui lòng hoàn tất form nhập liệu!');
+            throw new \UnexpectedValueException('Vui lòng hoàn tất nhập liệu đơn!');
         }
 
         $data = $this->doc->importNode($data, true);
